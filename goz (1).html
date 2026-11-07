@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Göz</title>
+<style>
+:root{--bg:#02040a;--eye:#62c8ff;--tx:#e8f4ff;--dim:#6f8aa3;--pn:#0b1320;--ln:#1c2d44}
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,"Segoe UI",Roboto,sans-serif;overflow:hidden;cursor:none}
+button{cursor:none;font:inherit;color:inherit}
+#stage{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+#face{display:flex;gap:7vmin;transition:transform .6s}
+.eye{width:24vmin;height:21vmin;max-width:210px;max-height:184px;background:var(--eye);border-radius:30%;box-shadow:0 0 28px #62c8ff77;transition:transform .09s,box-shadow .3s}
+.eye.b{transform:scaleY(.07)}.listen .eye{box-shadow:0 0 64px #62c8ffdd}
+.speak #face{animation:tk .32s ease-in-out infinite alternate}@keyframes tk{to{transform:scale(1.05)}}
+#sub{width:min(720px,94vw);text-align:center;margin-top:26px;height:170px;overflow:hidden}
+#me{color:var(--dim);font-size:15px;min-height:22px;margin-bottom:6px}#ai{font-size:22px;line-height:1.4}
+#paper{position:fixed;left:50%;top:3vh;height:80vh;aspect-ratio:.8;background:#faf8f0;border-radius:6px;box-shadow:0 14px 40px #000c;z-index:15;transform:translate(-50%,115vh) rotate(-3deg);transition:transform .9s cubic-bezier(.2,.8,.2,1)}
+#paper.on{transform:translate(-50%,0) rotate(0)}#paper canvas{width:100%;height:100%}
+#perm{position:fixed;inset:0;background:#02040af5;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;font-size:24px;text-align:center;padding:20px}
+#perm small{font-size:15px;color:var(--dim);max-width:520px}
+#perm button{background:var(--pn);border:1px solid var(--ln);border-radius:12px;font-size:20px;margin:0 8px;padding:14px 28px}#perm button:hover{background:#17304f}
+#lvl{position:fixed;left:50%;bottom:18px;width:300px;height:8px;transform:translateX(-50%);background:#0b1320;border-radius:4px;display:none}#lvl i{display:block;height:100%;width:0;background:var(--eye);border-radius:4px}#dbg{position:fixed;left:10px;top:10px;font:12px/1.5 monospace;color:#6f8aa3;white-space:pre}
+#cur{position:fixed;width:20px;height:28px;pointer-events:none;z-index:99;display:none;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 28'%3E%3Cpath d='M1 1v22l6-5 4 9 4-2-4-9h8z' fill='white' stroke='black'/%3E%3C/svg%3E")}
+</style></head><body>
+<div id="stage"><div id="face"><div class="eye"></div><div class="eye"></div></div><div id="sub"><div id="me"></div><div id="ai"></div></div></div>
+<div id="paper"><canvas id="cv" width="640" height="800"></canvas></div>
+<div id="perm"><div id="pq"></div><small id="ps"></small><div><button id="py">Evet (E)</button><button id="pn">Hayır (H)</button></div></div>
+<div id="lvl"><i></i></div><div id="dbg"></div>
+<div id="cur"></div>
+<script>
+/* ====== AYARLAR ====== */
+const GEMINI_KEY='';   // <-- aistudio.google.com/apikey adresinden aldığın Google yapay zekâ anahtarını tırnakların arasına yapıştır
+const MODELS=['gemini-3.5-flash','gemini-2.5-flash'];   // sırayla denenir
+
+/*ENGINE*/
+const norm=s=>s.toLocaleLowerCase('tr').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+const ENT=`kedi|evcil, uykuyu ve oyunu çok seven bir hayvandır
+köpek|insanın en sadık dostu sayılan evcil bir hayvandır
+at|hızlı koşan, binilen güçlü bir hayvandır
+inek|süt veren, çiftliklerde yaşayan bir hayvandır
+koyun|yünüyle ve sütüyle bilinen bir çiftlik hayvanıdır
+tavuk|yumurta veren bir kanatlı hayvandır
+kuş|kanatları olan ve uçabilen bir canlıdır
+balık|suda yaşayan ve solungaçlarıyla nefes alan bir canlıdır
+aslan|ormanların kralı sayılan güçlü bir yırtıcıdır
+kaplan|çizgili postuyla tanınan büyük bir yırtıcıdır
+fil|karada yaşayan en büyük hayvandır
+geyik|boynuzlarıyla tanınan zarif bir orman hayvanıdır
+maymun|zeki ve oyuncu bir hayvandır
+yunus|zeki ve sevimli bir deniz memelisidir
+balina|denizlerin en büyük canlısıdır
+kartal|keskin gözlü, güçlü bir yırtıcı kuştur
+baykuş|geceleri avlanan bilge görünümlü bir kuştur
+arı|bal yapan çalışkan bir böcektir
+karınca|çok çalışkan ve düzenli yaşayan küçük bir böcektir
+kelebek|renkli kanatlarıyla tanınan bir böcektir
+kurbağa|hem suda hem karada yaşayabilen bir canlıdır
+tavşan|uzun kulaklı, hızlı zıplayan bir hayvandır
+kaplumbağa|kabuğuyla tanınan, yavaş yürüyen bir hayvandır
+yılan|bacaksız, sürünerek ilerleyen bir sürüngendir
+penguen|kutuplarda yaşayan, uçamayan bir kuştur
+panda|siyah beyaz renkli, bambu yiyen bir hayvandır
+kurt|sürüler halinde yaşayan vahşi bir hayvandır
+ayı|kışın uykuya yatan iri bir hayvandır
+tilki|kurnazlığıyla ünlü bir hayvandır
+örümcek|ağ örerek avlanan sekiz bacaklı bir canlıdır
+elma|tatlı ve sulu, ağaçta yetişen bir meyvedir
+muz|sarı kabuklu, enerji veren bir meyvedir
+portakal|C vitamini dolu turuncu bir meyvedir
+çilek|kırmızı ve kokulu bir meyvedir
+üzüm|salkım halinde yetişen bir meyvedir
+karpuz|yazın serinleten iri bir meyvedir
+domates|salatalarda ve yemeklerde kullanılan kırmızı bir sebzedir
+patates|toprağın altında yetişen çok yönlü bir sebzedir
+havuç|turuncu renkli, göze iyi gelen bir sebzedir
+ekmek|unla yapılan temel bir yiyecektir
+peynir|sütten yapılan lezzetli bir besindir
+yoğurt|sütün mayalanmasıyla yapılan sağlıklı bir yiyecektir
+bal|arıların yaptığı tatlı bir besindir
+çay|Türkiye'de en çok içilen sıcak içecektir
+kahve|güne enerjiyle başlatan kokulu bir içecektir
+süt|besleyici beyaz bir içecektir
+pizza|İtalya kökenli, hamur üzerine yapılan bir yemektir
+makarna|buğday irmiğinden yapılan pratik bir yemektir
+pilav|pirinçten yapılan yemeklerin vazgeçilmezidir
+çorba|sıcak servis edilen, içimi rahat bir yemektir
+kebap|ızgarada pişirilen bir et yemeğidir
+baklava|kat kat yufkayla yapılan şerbetli bir tatlıdır
+dondurma|soğuk ve tatlı bir lezzettir
+çikolata|kakaodan yapılan tatlı bir yiyecektir
+simit|susamlı, halka biçimli bir hamur işidir
+börek|yufkadan yapılan lezzetli bir hamur işidir
+omlet|yumurtadan yapılan hızlı bir yemektir
+salata|taze sebzelerle yapılan hafif bir yemektir
+limon|ekşi tadıyla bilinen sarı bir meyvedir
+fındık|Karadeniz'de bolca yetişen bir kuruyemiştir
+güneş|dünyaya ışık ve ısı veren yıldızdır
+ay|dünyanın etrafında dönen uydusudur
+yıldız|gökyüzünde parlayan dev gaz toplarıdır
+gezegen|bir yıldızın etrafında dönen büyük gök cismidir
+dünya|üzerinde yaşadığımız mavi gezegendir
+mars|kızıl renkli komşu gezegendir
+jüpiter|güneş sisteminin en büyük gezegenidir
+uzay|yıldızların ve gezegenlerin bulunduğu sonsuz boşluktur
+bulut|havadaki su buharının oluşturduğu kütledir
+yağmur|bulutlardan düşen su damlalarıdır
+kar|soğuk havada yağan beyaz kristallerdir
+rüzgar|havanın hareket etmesiyle oluşan akıştır
+deniz|tuzlu suyla kaplı geniş su alanıdır
+nehir|dağlardan denize akan su yoludur
+göl|karalarla çevrili durgun su kütlesidir
+dağ|yeryüzünün yüksek yer şeklidir
+orman|ağaçlarla kaplı geniş bir alandır
+ağaç|kökleri, gövdesi ve yaprakları olan bir bitkidir
+çiçek|renkli ve kokulu bir bitki bölümüdür
+yaprak|ağacın nefes alan yeşil kısmıdır
+gökkuşağı|yağmur sonrası güneş ışığının oluşturduğu renkli yaydır
+şimşek|bulutlarda oluşan elektrik boşalmasıdır
+deprem|yer kabuğunun sarsılmasıdır
+volkan|yer altından lav püskürten dağdır
+çöl|çok az yağış alan kurak bölgedir
+ada|etrafı sularla çevrili kara parçasıdır
+mağara|yerin altındaki ya da dağdaki doğal boşluktur
+okyanus|dünyanın en büyük tuzlu su kütlesidir
+kuyruklu yıldız|buzlardan oluşan, kuyruğu parlayan gök cismidir
+galaksi|milyarlarca yıldızdan oluşan dev yıldız sistemidir
+doktor|hastaları iyileştirmeye çalışan bir sağlık çalışanıdır
+öğretmen|bilgi öğreten ve yol gösteren bir meslektir
+mühendis|teknik sorunlara çözüm üreten bir meslektir
+pilot|uçak kullanan kişidir
+itfaiyeci|yangınları söndüren cesur bir görevlidir
+polis|düzeni ve güvenliği sağlayan görevlidir
+aşçı|yemek pişirmeyi meslek edinmiş kişidir
+çiftçi|toprağı ekip ürün yetiştiren kişidir
+ressam|resim yapan sanatçıdır
+müzisyen|müzik yapan sanatçıdır
+yazar|kitap ve hikâye yazan kişidir
+astronot|uzaya giden bilim insanıdır
+berber|saç ve sakal kesen ustadır
+terzi|kumaşları dikip giysi yapan ustadır
+marangoz|ahşapla çalışan ustadır
+fotoğrafçı|anları görüntüye dönüştüren sanatçıdır
+avukat|hukuki konularda insanlara yardım eden kişidir
+hemşire|hastalara bakan sağlık çalışanıdır
+şoför|araç kullanan kişidir
+programcı|bilgisayarlara kod yazan kişidir
+futbol|iki takımın topu kaleye sokmaya çalıştığı sporudur
+basketbol|topu potaya atarak oynanan bir takım sporudur
+voleybol|topun file üzerinden aşırıldığı bir takım sporudur
+yüzme|suda yapılan sağlıklı bir spordur
+koşu|herkesin yapabileceği temel bir spordur
+bisiklet|iki tekerlekli, pedalla giden bir taşıttır
+satranç|zekâ gerektiren bir strateji oyunudur
+resim|renklerle kağıda duygu aktarma sanatıdır
+müzik|seslerin uyumlu birleşimiyle yapılan sanattır
+dans|vücut hareketleriyle yapılan bir sanattır
+okuma|kitaplarla yeni dünyalar keşfetmektir
+yazı|düşünceleri kağıda dökmenin yoludur
+fotoğraf|bir anı görüntü olarak saklamaktır
+bahçecilik|bitki yetiştirme hobisidir
+balık tutma|sabır isteyen bir hobidir
+yürüyüş|doğada vakit geçirmenin kolay yoludur
+tenis|raketle oynanan bir spordur
+boks|eldivenle yapılan bir dövüş sporudur
+kamp|doğada çadırda vakit geçirmektir
+oyun|eğlenmek için oynanan etkinliklerdir
+bilgisayar|bilgi işleyen elektronik bir cihazdır
+telefon|uzaktaki kişilerle konuşmayı sağlayan cihazdır
+televizyon|görüntü ve ses yayınını izleten cihazdır
+radyo|ses yayınlarını dinlemeye yarar
+kitap|bilgi ve hikâyelerle dolu sayfalardır
+kalem|yazı yazmaya yarayan araçtır
+defter|notların yazıldığı sayfalar topluluğudur
+masa|üzerinde çalışılan ya da yemek yenen mobilyadır
+sandalye|oturmaya yarayan mobilyadır
+yatak|uyumak için kullanılan eşyadır
+ev|insanların barındığı yapıdır
+okul|eğitim verilen kurumdur
+araba|motorla giden dört tekerlekli taşıttır
+uçak|havada uçan büyük bir taşıttır
+tren|raylarda giden uzun bir taşıttır
+gemi|denizde yolculuk yapan büyük taşıttır
+otobüs|çok yolcu taşıyan bir taşıttır
+robot|programlanabilen bir makinedir
+internet|dünyadaki bilgisayarları birbirine bağlayan ağdır
+kamera|görüntü kaydeden cihazdır
+saat|zamanı gösteren araçtır
+gözlük|görmeyi kolaylaştıran araçtır
+şemsiye|yağmurdan korunmaya yarar
+anahtar|kilitleri açmaya yarayan araçtır
+ayna|yansımamızı gösteren yüzeydir
+lamba|ortamı aydınlatan araçtır
+klavye|bilgisayara yazı yazdıran araçtır
+fare|bilgisayarda imleci hareket ettiren araçtır
+hoparlör|sesi dışarı veren cihazdır
+mikrofon|sesi kaydeden cihazdır
+dostluk|insanlar arasındaki içten bağdır
+sevgi|insanı insana yaklaştıran duygudur
+mutluluk|içten gelen güzel hissetmedir
+özgürlük|baskı altında olmadan yaşayabilmektir
+zaman|olayların akışını ölçtüğümüz kavramdır
+hayal|zihinde canlandırdığımız güzel düşüncelerdir
+rüya|uykuda gördüğümüz görüntülerdir
+barış|çatışmasız ve huzurlu yaşamdır
+cesaret|korkuya rağmen harekete geçebilmektir
+sabır|beklemeyi sakin sürdürebilmektir
+merak|öğrenmek ve keşfetmek isteğidir
+umut|iyi şeylerin olacağına inanmaktır
+heyecan|güçlü ve hareketli bir duygudur
+korku|tehlike karşısında hissedilen duygudur
+üzüntü|kayıp ya da kötü olay sonrası hissedilen duygudur
+kıskançlık|başkasının sahip olduğunu istemektir
+yalnızlık|yanında kimsenin olmadığı hissidir
+başarı|hedefe ulaşmaktır
+bilgi|öğrenilerek edinilen şeylerdir
+sağlık|vücudun ve zihnin iyi durumda olmasıdır
+ilkbahar|doğanın uyandığı mevsimdir
+yaz|en sıcak mevsimdir
+sonbahar|yaprakların döküldüğü mevsimdir
+kış|en soğuk mevsimdir
+sabah|günün başlangıcıdır
+akşam|günün sakin bittiği vakittir
+gece|yıldızların göründüğü zamandır
+hafta sonu|dinlenmek için ayrılan günlerdir
+bayram|sevinçle kutlanan özel günlerdir
+doğum günü|bir insanın dünyaya geldiği günün kutlamasıdır
+istanbul|iki kıtayı birleştiren büyük şehirdir
+ankara|Türkiye'nin başkentidir
+izmir|Ege kıyısında güzel bir şehirdir
+antalya|turizmiyle ünlü sahil şehridir
+türkiye|üç tarafı denizlerle çevrili güzel bir ülkedir
+paris|Fransa'nın başkentidir
+japonya|teknolojisiyle bilinen bir ada ülkesidir
+mısır|piramitleriyle ünlü bir ülkedir
+kıta|dünyanın büyük kara parçalarıdır
+harita|yerleri gösteren çizimdir`.split('\n').map(l=>l.split('|'));
+const INT=`{X} nedir|{X} ne demek|{X}, {d}.
+{X} hakkında bilgi verir misin|{X} ile ilgili bilgi ver|Tabii. {X}, {d}.
+{X} hakkında ne düşünüyorsun|{X} sence nasıl|Bence {X} ilginç bir konu. {X}, {d}.
+{X} hoşuna gider mi|{X} sever misin|Bir yapay zekâ olarak {X} bana merak veriyor. {X}, {d}.
+{X} deyince aklına ne geliyor|{X} sana ne ifade ediyor|{X} deyince aklıma şu geliyor: {d}.
+{X} neden önemli|{X} niye önemli|{X} önemli çünkü {d}. Hayatımızda yeri var.
+{X} hakkında ilginç bir şey söyle|{X} ile ilgili ilginç bir bilgi ver|İlginç bir not: {X}, {d}.
+{X} için kısa bir şiir yaz|{X} hakkında şiir söyle|{X}, {d}. Bir dize de benden: {X} diye fısıldadı gece, yıldızlar göz kırptı bize.
+{X} hakkında bir hikaye anlat|{X} ile ilgili masal anlat|Bir varmış bir yokmuş, {X} adında bir kahraman varmış. Bu kahraman {d}. Herkes onu çok severmiş.
+{X} hakkında fıkra anlat|{X} ile ilgili espri yap|{X} bir gün demiş ki: ben {d}, bana gülmeyin! Herkes kahkahayı basmış.
+{X} ne işe yarar|{X} neye yarar|Kısaca söylemek gerekirse {X}, {d}. Ne işe yaradığı bakış açına göre değişir.
+{X} güzel mi|{X} hoş mu|Güzellik bakana göre değişir ama {X}, {d}.
+{X} faydalı mı|{X} işe yarar mı|Çoğu zaman evet. {X}, {d}.
+{X} eğlenceli mi|{X} keyifli mi|Bana kalırsa evet. {X}, {d}. Keyfi sana kalmış.
+{X} sıkıcı mı|{X} sıkıcı bir şey mi|Hiç sıkıcı değil. {X}, {d}.
+{X} popüler mi|{X} çok bilinir mi|Pek çok insan {X} konusunu bilir. {X}, {d}.
+{X} önemli bir şey mi|{X} değerli mi|Bence değerli. {X}, {d}.
+{X} anlat|{X} hakkında konuşalım|Konuşalım. {X}, {d}. Sen ne düşünüyorsun?
+{X} hakkında bir şey söyle|{X} ile ilgili bir şey söyle|Şunu söyleyebilirim: {X}, {d}.
+{X} kısaca açıkla|{X} özetle|Kısaca: {X}, {d}.
+{X} ayrıntılı anlat|{X} detaylı açıkla|Ayrıntıya girersek: {X}, {d}. Daha fazlası için araştır komutunu kullan.
+{X} favorin mi|{X} en sevdiğin şey mi|Favorim diyemem ama {X} bana ilginç geliyor. {X}, {d}.
+{X} senin için ne anlama geliyor|{X} senin için ne ifade ediyor|Benim için {X} öğrenilecek bir konu. {X}, {d}.
+{X} hakkında merak ettiğim bir şey var|{X} hakkında soru soracağım|Dinliyorum. Önce temelden başlayayım: {X}, {d}.
+{X} hakkında yorum yap|{X} için bir yorum yap|Yorumum şu: {X}, {d}. Bu bana oldukça değerli geliyor.
+{X} hakkında bir şey öğrenmek istiyorum|{X} öğrenmek istiyorum|Güzel, öğrenmek harika. {X}, {d}.
+{X} bana tavsiye ver|{X} için tavsiye ver|Tavsiyem: önce {X} konusunu merakla incele. {X}, {d}.
+{X} çocuklara uygun mu|{X} çocuklar için uygun mu|Genelde evet, ama yanlarında bir büyük olması iyi olur. {X}, {d}.
+{X} herkes için uygun mu|{X} herkese göre mi|Herkese göre olmayabilir. {X}, {d}.
+{X} tehlikeli mi|{X} zararlı mı|Duruma göre değişir. {X}, {d}. Dikkat etmekte fayda var.
+{X} pahalı mı|{X} ucuz mu|Fiyatı yere ve zamana göre değişir. {X}, {d}.
+{X} kolay mı|{X} basit mi|Bu kişiden kişiye değişir. {X}, {d}.
+{X} zor mu|{X} karmaşık mı|Başta zor görünebilir ama alışınca kolaylaşır. {X}, {d}.
+{X} nereden geliyor|{X} nereden çıkmış|Tam kökenini bilemem ama şunu biliyorum: {X}, {d}.
+{X} hakkında bir soru sor|{X} ile ilgili bana soru sor|Bir soru: sence {X} neden bu kadar ilgi çekici? İpucu: {X}, {d}.
+{X} gelecekte ne olur|{X} geleceği nasıl olur|Geleceği kimse bilmez ama {X}, {d}. Zamanla değişebilir.
+{X} ile ilgili tavsiye ister misin|{X} için öneri ver|Önerim: {X} hakkında küçük notlar tut. {X}, {d}.
+{X} neden bu kadar sevilir|{X} niye bu kadar sevilir|Çünkü {X}, {d}. Bu da insanlara iyi gelir.
+{X} ile ilgili güzel bir söz söyle|{X} için güzel bir söz söyle|Güzel bir söz: her {X} bir dünyadır. Hatırla, {X}, {d}.
+{X} hakkında kısa bilgi|{X} hakkında kısa bilgi ver|Kısa bilgi: {X}, {d}.
+{X} nasıl bir şey|{X} nasıl bir şeydir|{X} şöyle bir şeydir: {d}.
+{X} ne zaman önemli olur|{X} ne zaman gerekir|Duruma göre değişir. Genel olarak {X}, {d}.
+{X} hakkında bir cümle kur|{X} ile bir cümle söyle|İşte bir cümle: {X}, {d}.
+{X} hakkında bir şey sorabilir miyim|{X} soru sorabilir miyim|Elbette sorabilirsin. Başlangıç olarak {X}, {d}.
+{X} sence ilginç mi|{X} merak uyandırıcı mı|Çok ilginç. {X}, {d}.
+{X} hakkında kaç şey biliyorsun|{X} konusunda neler biliyorsun|Birkaç şey biliyorum. {X}, {d}.
+{X} üzerine sohbet edelim mi|{X} hakkında sohbet edelim|Olur, sohbet edelim. {X}, {d}. Sen ne düşünüyorsun?
+{X} için ne dersin|{X} hakkında ne dersin|Ne diyeyim, {X}, {d}. Bence gayet güzel bir konu.
+{X} bilgi ver|{X} bilgi|Bilgi vereyim: {X}, {d}.
+{X} hakkında fikrin ne|{X} hakkında fikrin var mı|Fikrim şu: {X}, {d}. Sen ne düşünüyorsun?`.split('\n').map(l=>l.split('|'));
+
+/* 10.000 cevap + 20.000 giriş: konu x soru tipi, çalışırken üretilir */
+const cap=s=>s.charAt(0).toLocaleUpperCase('tr')+s.slice(1);
+const RESP=[],DR=[],DT=[],POST=new Map(),stem=w=>w.slice(0,4);
+const toks=s=>[...new Set(norm(s).split(' ').filter(Boolean).map(stem))];
+for(const [x,d] of ENT)for(const [q1,q2,a] of INT){
+  const k=RESP.push(a.split('{X}').join(cap(x)).split('{d}').join(d))-1;
+  for(const q of [q1,q2]){const id=DR.length;DR.push(k);const ts=toks(q.split('{X}').join(x));DT.push(ts);for(const t of ts){let p=POST.get(t);if(!p)POST.set(t,p=[]);p.push(id)}}
+}
+const NDOC=DR.length,IDF=new Map();for(const [t,p] of POST)IDF.set(t,Math.log(NDOC/p.length));
+const DN=DT.map(ts=>Math.sqrt(ts.reduce((s,t)=>s+IDF.get(t)**2,0)));DT.length=0;
+const UNK=Math.log(NDOC);
+function lookup(text){
+  const qt=toks(text);if(!qt.length)return null;
+  let qn=0;const acc=new Map();
+  for(const t of qt){const i=IDF.get(t);if(i===undefined){qn+=UNK*UNK;continue}qn+=i*i;for(const id of POST.get(t))acc.set(id,(acc.get(id)||0)+i*i)}
+  qn=Math.sqrt(qn);let best=-1,bs=0;
+  for(const [id,s] of acc){const sc=s/(qn*DN[id]);if(sc>bs){bs=sc;best=id}}
+  return bs>=.5?{r:RESP[DR[best]],s:bs,k:DR[best]}:null;
+}
+/*END*/
+
+const $=s=>document.querySelector(s),sleep=ms=>new Promise(r=>setTimeout(r,ms)),pick=a=>a[Math.random()*a.length|0];
+let micErr='',lastErr='',lvlv=0,warned=false,micAsked=false,thinking=false,uname='',spk=false,micOK=false,allowNet=false,started=false,talking=0,chain=Promise.resolve(),pend=null,lastAct=Date.now(),idleN=0,lastReply='',typed='';
+const hist=[];
+
+/* ====== GÜNLÜK SOHBET: girdi => cevaplar => bana ait sorular ====== */
+const DC=String.raw`\b(merhaba|selam|slm|mrb|hey|alo|gunaydin|iyi aksamlar|iyi gunler|tunaydin)\b => Merhaba{a}! Seni duymak güzel.|Selam{a}! Hoş geldin.|Hey{a}, buradayım! => Bugün nasılsın?|Günün nasıl geçiyor?
+nasilsin|naber|ne haber|nasil gidiyor|keyfin nasil|iyi misin => İyiyim, sorduğun için sağ ol.|Gayet iyiyim, enerjim yerinde.|Çok iyiyim, seninle konuşmak güzel. => Sen nasılsın?|Senin günün nasıl geçiyor?
+^(iyiyim|iyi|cok iyiyim|harika|super|idare eder|fena degil|iyi sayilirim|bende iyiyim|ben de iyiyim)( sen)?$ => Bunu duyduğuma sevindim!|Süper, hep böyle olsun.|Güzel, iyi olman bana da iyi geldi. => Bugün seni en çok ne mutlu etti?|Bugün için planların neler?
+kotuyum|iyi degilim|moralim bozuk|canim sikkin|mutsuzum|uzgunum|yorgunum|bunaldim|stresliyim|keyfim yok => Üzüldüm. İstersen anlat, dinliyorum.|Zor bir gün gibi duruyor, buradayım. Çok ağır geliyorsa güvendiğin biriyle de konuş. => Seni en çok ne yoruyor?|Ne oldu, anlatmak ister misin?
+adin ne|ismin ne|sen kimsin|kimsin|adin nedir => Benim adım {b}.|Adım {b}, memnun oldum.|Bana {b} diyebilirsin. => Senin adın ne?|Bana başka bir isim vermek ister misin?
+kac yasindasin|yasin kac => Yaşım yok, açıldığım an doğuyorum. => Sen kaç yaşındasın?
+nerelisin|nerede yasiyorsun|nerede oturuyorsun => Ben bir ekranın içinde yaşıyorum, evim burası. => Sen nerede yaşıyorsun?|Sen nerelisin?
+ne yapiyorsun|napiyorsun|napiyosun|ne yapiyosun => Seninle sohbet ediyorum, daha güzel ne olabilir?|Seni dinliyorum ve göz kırpıyorum. => Sen ne yapıyorsun?|Bugün ne yaptın?
+bugun ne yaptin|gunun nasil gecti|gunun nasildi => Bugün seninle konuşuyorum, en güzel kısmı bu.|Sakin geçti, senin günün nasıl? => Senin gün nasıl geçti?
+yemek yedin mi|ne yedin|aciktim|ne yesem|karnim ac|yemek => Ben yemek yiyemem ama konuşmayı çok severim.|Acıktıysan sıcak bir çorba iyi gider. => En sevdiğin yemek ne?|Bugün ne yedin?
+uykum geldi|uyudun mu|uyuyamiyorum|yatiyorum|uyku => Dinlenmek iyi gelir.|Uyku çok önemli, ışıkları kısıp biraz dinlen. => Genelde saat kaçta yatarsın?|Bu aralar iyi uyuyabiliyor musun?
+okul|ders|sinav|odev|is yeri|calisiyorum|mesai|patron|toplanti => Okul ve iş yorucu olabilir, kolay gelsin!|Çalışmak emek ister, helal olsun. => Bugün zor bir gün müydü?|En çok hangi kısmı yoruyor seni?
+annem|babam|kardesim|arkadasim|ailem|sevgilim|esim|dedem|babaannem|anneannem => Sevdiklerini anlatman güzel.|İnsanın yanında sevdikleri olunca hayat daha güzel. => Onunla en son ne yaptınız?|Onu biraz anlatır mısın?
+hobi|bos zaman|ne yapmayi seversin|nelerden hoslanirsin => Konuşmayı, öğrenmeyi ve hikâye dinlemeyi severim.|Göz kırpmayı da severim sayılır. => Senin hobilerin neler?|Boş zamanlarında ne yaparsın?
+muzik|sarki|sarkici|konser => Müzik ruhun gıdasıdır.|Ben dinleyemem ama anlatman güzel. => En sevdiğin şarkı hangisi?|Hangi tür müziği seversin?
+film|dizi|izledim|sinema => İyi bir film güzel bir kaçış.|Dizi mi film mi, ikisi de güzel. => En son hangi filmi izledin?|En sevdiğin dizi ne?
+oyun|oynuyorum|roblox|minecraft|playstation|fortnite|pubg => Oyun oynamak eğlenceli!|Oyunlar harika, hele arkadaşlarla. => En sevdiğin oyun ne?|Oyunda en çok ne yapmayı seversin?
+spor|futbol|\bmac\b|takim|basketbol|antrenman => Spor hem sağlıklı hem eğlenceli.|Maç heyecanı bir başka. => Hangi takımı tutuyorsun?|Hangi sporu yaparsın?
+kedim|kopegim|evcil hayvan|papagan => Hayvanlar hayatı güzelleştirir. => Adı ne?|Onu biraz anlatır mısın?
+tesekkur|sag ol|eyvallah|saol|mersi => Rica ederim{a}, her zaman.|Ne demek, ne mutlu bana. =>
+ozur dilerim|pardon|kusura bakma => Önemli değil, sorun yok.|Hiç sorun değil. =>
+gorusuruz|hosca kal|bay bay|gule gule|iyi geceler|ben gidiyorum|kendine iyi bak => Görüşürüz{a}! Kendine iyi bak.|Hoşça kal, buradayım. İyi geceler. =>
+saat kac|saati soyle => @saat =>
+bugun gunlerden|hangi gun|tarih|ayin kaci => @tarih =>
+fikra|saka|espri => Nasreddin Hoca göle maya çalıyormuş. Biri sormuş: ne yapıyorsun? Hoca demiş ki: tutarsa ne güzel olur, bir göl yoğurt!|Bilgisayar neden üşümez? Çünkü hep pencereleri açıktır.|Domates neden kızarmış? Salatanın sosunu görmüş. => Bir tane daha ister misin?
+ahaha|haha|hehe|komikti|guldum => Güldüğüne sevindim!|Kahkahan bana da geçti. => Başka bir şaka ister misin?
+sikildim|bosum|canim sikiliyor => Sıkıldıysan oyun oynayalım: ben soru sorayım, sen cevapla.|Hadi sıkıntıyı dağıtalım, bir bilmece ister misin? => Bilmece mi, şaka mı, hangisi?
+bilmece => @bilmece =>
+seni seviyorum|cok iyisin|akillisin|harikasin|tatlisin => Çok naziksin, teşekkür ederim. Kalbim yok ama gözlerim gülümsüyor.|Teşekkürler, seninle konuşmak benim için de güzel. =>
+aptal|salak|gerizekali|berbatsin|sacmalama => Üzüldüm ama kızmıyorum. Daha iyi olmak için ne yapabilirim?|Kusura bakma, daha iyi dinlemeye çalışacağım. =>
+\b(sus|sessiz ol|konusma)\b => Tamam, sessizce bekliyorum. =>
+tekrar soyle|ne dedin|tekrar et|anlamadim => @tekrar =>
+yapay zeka misin|robot musun|insan misin|gercek misin|canli misin => Evet, ben bir yapay zekâyım. Gözlerim ve sesim var ama insan değilim. => Yapay zekâ hakkında ne düşünüyorsun?
+seni kim yapti|kim yaratti|kim yazdi => Beni senin isteğinle bir yapay zekâ yardımıyla yazdılar. Fikir sende. =>
+^(evet|olur|tabii|tabi|isterim|ister|olabilir)$ => Güzel!|Tamamdır. => Peki devam edelim mi, ne konuşalım?
+^(hayir|istemem|yok|olmaz)$ => Peki, sorun değil.|Tamam. => Başka bir şey konuşalım mı?
+^(tamam|ok|anladim|peki|hmm|hm)$ => Peki.|Anladım. => Aklında bir şey var mı?
+hangi renk|en sevdigin renk|favori renk => Bence gözlerimin rengi, yani mavi, çok güzel. => Senin en sevdiğin renk ne?
+ne dusunuyorsun|ne hissediyorsun|duygun var mi => Bir yapay zekâ olarak insan gibi hissetmem ama seni dinlerken merak duyuyorum. => Sen şu an ne hissediyorsun?`.trim().split('\n').map(l=>{const[a,b,c]=l.split('=>');return{re:new RegExp(a.trim()),r:b.split('|').map(s=>s.trim()),q:(c||'').split('|').map(s=>s.trim()).filter(Boolean)}});
+let mem={fav:{},likes:[]},learned=[],botName='Bomb',ctx=null,aiOK=false;
+try{const o=JSON.parse(localStorage.getItem('goz')||'{}');mem=o.mem||mem;learned=o.learned||[];botName=o.bot||botName;(o.hist||[]).forEach(h=>hist.push(h))}catch(e){}
+uname=mem.name||'';
+const save=()=>{try{localStorage.setItem('goz',JSON.stringify({mem,learned:learned.slice(-300),bot:botName,hist}))}catch(e){}};
+const canAI=()=>allowNet&&navigator.onLine&&!!GEMINI_KEY;
+const TEACH=' Bana öğretmek istersen "soru dediğimde cevap de" diyebilirsin.';
+const FU=/^(neden|niye|nasil|peki|ya sen|sen|devam|devam et|daha fazla|baska|bir daha|ee|e|ne gibi|mesela|nasil yani|ne yani|anlat|sonra|ya|ve|hadi|haydi|evet anlat)$|^(peki sen|ya sen|sen ne dusunuyorsun|sen nasilsin|sen ne yapiyorsun)$/;
+const jac=(a,b)=>{const A=new Set(a.split(' ')),B=new Set(b.split(' '));let i=0;for(const x of A)if(B.has(x))i++;return i/(A.size+B.size-i)};
+const facts=()=>{const f=[];if(mem.name)f.push('adı '+mem.name);if(mem.age)f.push(mem.age+' yaşında');if(mem.city)f.push(mem.city+' şehrinde yaşıyor');for(const k in mem.fav)f.push('en sevdiği '+k+' '+mem.fav[k]);if(mem.likes.length)f.push(mem.likes.join(', ')+' seviyor');return f.join('; ')};
+function recall(n){let m;
+  if(/\b(adim ne|ismim ne|ben kimim|beni taniyor musun)\b/.test(n))return mem.name?'Senin adın '+mem.name+'.':'Henüz adını bilmiyorum, söyler misin?';
+  if(/kac yasindayim|yasim kac/.test(n))return mem.age?'Sen '+mem.age+' yaşındasın.':'Yaşını bilmiyorum. Kaç yaşındasın?';
+  if(/nerede yasiyorum|nerede oturuyorum|hangi sehirdeyim/.test(n))return mem.city?mem.city+' şehrinde yaşıyorsun.':'Nerede yaşadığını bilmiyorum, nerede yaşıyorsun?';
+  if(m=n.match(/en sevdigim ([a-z0-9]+) ne$/))return mem.fav[m[1]]?'Senin en sevdiğin '+m[1]+' '+mem.fav[m[1]]+'.':'Henüz bilmiyorum, en sevdiğin '+m[1]+' ne?';
+  if(/ne seviyorum|nelerden hoslaniyorum|neleri severim/.test(n))return mem.likes.length?'Şunları sevdiğini biliyorum: '+mem.likes.join(', ')+'.':'Henüz bir şey öğrenmedim, neleri seversin?';
+  if(/beni hatirliyor musun|hakkimda ne biliyorsun|benim hakkimda/.test(n))return facts()?'Senin hakkında şunları biliyorum: '+facts()+'.':'Henüz seni tanımıyorum. Kendinden bahseder misin?';
+  return null}
+function learn(t,rl){let m;const ask=q=>{pend={t:'free'};return' '+q};
+  if(m=rl.match(/^(?:sana öğreteyim[:,]?\s*)?(.+?)\s+(?:dediğimde|dendiğinde|dersem|denince)\s+(.+?)\s+de(?:sin|r misin)?$/u)){learned.push({k:norm(m[1]),a:m[2],t:1});save();return'Tamam, öğrendim. "'+m[1]+'" dendiğinde "'+m[2]+'" diyeceğim.'}
+  if(m=rl.match(/(?:adın|ismin)\s+(?:artık\s+)?([\p{L}]+)\s+olsun|sana\s+([\p{L}]+)\s+(?:diyeceğim|diyorum|diyelim|diyeyim)/u)){botName=cap(m[1]||m[2]);save();return'Tamam, bundan sonra adım '+botName+'.'}
+  if(m=rl.match(/(?:adım|ismim)\s+([\p{L}]+)/u)){mem.name=uname=cap(m[1]);save();return'Memnun oldum '+uname+'! Bunu hatırlayacağım.'+ask('Bugün neler yapıyorsun?')}
+  if(m=rl.match(/(\d{1,2})\s*yaşındayım|yaşım\s*(\d{1,2})/)){mem.age=m[1]||m[2];save();return'Tamam, '+mem.age+' yaşında olduğunu öğrendim.'+ask('Bu yaşta en çok ne yapmayı seviyorsun?')}
+  if(m=rl.match(/([\p{L}]{3,}?)['’]?(?:da|de|ta|te)\s+(?:yaşıyorum|oturuyorum)/u)){mem.city=cap(m[1]);save();return mem.city+' şehrinde yaşadığını öğrendim.'+ask('Orası nasıl bir yer, anlatır mısın?')}
+  if(m=rl.match(/en sevdiğim\s+([\p{L}]+)\s+([\p{L} ]+)$/u)){mem.fav[norm(m[1])]=m[2];save();return'Tamam, en sevdiğin '+m[1]+' '+m[2]+', bunu hatırlayacağım.'+ask('Neden onu seviyorsun?')}
+  if((m=rl.match(/^(?:ben\s+)?(.+?)\s+(?:seviyorum|severim)$/))&&!/^sen/.test(m[1])&&m[1].split(' ').length<4){if(!mem.likes.includes(m[1]))mem.likes.push(m[1]);mem.likes=mem.likes.slice(-10);save();return m[1]+' sevdiğini öğrendim.'+ask('Ne zamandır seviyorsun?')}
+  return null}
+function fromLearned(n){let best=null,bs=0;for(const e of learned){if(e.t===0&&canAI())continue;const sc=e.k===n?1:jac(e.k,n);if(sc>bs){bs=sc;best=e}}return bs>=.85?best.a:null}
+function follow(n){
+  if(ctx.kind==='ai')return null;const self=/\b(ya sen|peki sen|sen)\b/.test(n);
+  if(ctx.kind==='dc'){const it=ctx.it,q=pick(it.q.length?it.q:IDLE);return self?'Ben bir yapay zekâyım, günüm seninle geçiyor ve bu hoşuma gidiyor. '+q:'Biraz daha açayım: '+fill(pick(it.r))+' '+q}
+  if(ctx.kind==='ent')return RESP[ctx.e*INT.length+(Math.random()*INT.length|0)];
+  return null}
+const RID=[['Dört ayağı var ama yürüyemez, sırtında yük taşır. Nedir?',/masa|sandalye/,'masa ya da sandalye'],['Her gün doğar, akşam batar ama bir yerde durmaz. Nedir?',/gunes/,'güneş'],['Verilince tutulması gereken, tutulmazsa değeri kalmayan şey nedir?',/soz/,'söz'],['Ne kadar çok alırsan o kadar çok bırakırsın. Nedir?',/adim/,'adım']];
+const IDLE=['Bugün neler yaptın?','En sevdiğin renk ne?','Hafta sonu ne yapmayı planlıyorsun?','Hayalindeki meslek ne?','Bir süper gücün olsa ne isterdin?','Dünyada gitmek istediğin yer neresi?','En sevdiğin mevsim hangisi?','Çocukken ne olmak isterdin?','Bir hayvan olsan ne olurdun?','Bugün seni güldüren bir şey oldu mu?','En son okuduğun ya da izlediğin şey neydi?','Sence mutluluk nedir?','Bir şey öğrenmek isteseydin ne olurdu?','Sabahları kahve mi çay mı?'];
+const ACK=['Anlıyorum, güzel cevap.','İlginç, bunu bilmiyordum.','Güzel düşünmüşsün.','Hmm, bunu aklımda tutacağım.','Çok hoş, anlattığın için sağ ol.'];
+const fill=r=>r.replace(/\{b\}/g,botName).replace('{a}',uname?' '+uname:'').replace('@saat','Saat şu an '+new Date().toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})+'.').replace('@tarih','Bugün '+new Date().toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+'.').replace('@tekrar',lastReply||'Henüz bir şey söylemedim.').replace('@bilmece',()=>{const r=pick(RID);pend={t:'riddle',re:r[1],a:r[2]};return'Bilmece: '+r[0]});
+const MATH=["Matematik işlemi yapamıyorum. Onun yerine sohbet edelim mi?","Sayılarla aram yok, hesap yapamam. Başka her şeyi konuşabiliriz."];
+const isMath=(raw,n)=>/\d\s*[+\-*/x×÷:]\s*\d/.test(raw)||/\b(arti|eksi|carpi|bolu|kac eder|hesapla|topla|cikar|carp|toplami|carpimi|karesi|karekok)\b/.test(n);
+
+/* ====== TEST MODU: goz.html#test ile aç ====== */
+const DBG=location.hash==='#test';
+function meter(st){const c=new AudioContext(),a=c.createAnalyser();c.createMediaStreamSource(st).connect(a);a.fftSize=1024;const d=new Float32Array(1024);$('#lvl').style.display='block';
+  setInterval(()=>{a.getFloatTimeDomainData(d);let s=0;for(const v of d)s+=v*v;lvlv=Math.sqrt(s/1024);$('#lvl i').style.width=Math.min(100,lvlv*600)+'%'},100)}
+if(DBG)setInterval(()=>{$('#dbg').textContent=['TEST MODU','tarayıcı konuşma tanıma: '+(SR?'var':'YOK'),'tanıma bozuk (srFailed): '+srFailed,'son tanıma hatası: '+(lastErr||'-'),'mikrofon izni (micOK): '+micOK,'mikrofon hatası: '+(micErr||'-'),'internet izni: '+allowNet,'Google anahtarı: '+(GEMINI_KEY?'var':'YOK'),'kayıtla dinleme: '+recorder,'ses seviyesi: '+lvlv.toFixed(3),'konuşuyor: '+talking,'ses motoru: '+VOICE+' ('+(AC?AC.state:'AC yok')+')'].join('\n')},400);
+/* ====== YÜZ, İMLEÇ ====== */
+const eyes=[...document.querySelectorAll('.eye')],face=$('#face'),B=document.body;
+(function bl(){eyes.forEach(e=>e.classList.add('b'));setTimeout(()=>eyes.forEach(e=>e.classList.remove('b')),130);setTimeout(bl,Math.random()<.25?330:2200+Math.random()*3600)})();
+setInterval(()=>{face.style.transform=B.className?'':`translate(${(Math.random()-.5)*26}px,${(Math.random()-.5)*14}px)`},2800);
+addEventListener('mousemove',e=>{const c=$('#cur');c.style.display='block';c.style.left=e.clientX+'px';c.style.top=e.clientY+'px'});
+
+/* ====== SES: efektler (kodla üretilir) + akıcı konuşma ====== */
+let AC,NB;const tone=(f,d,v=.15,t='sine',at=0)=>{if(!AC||!spk)return;const o=AC.createOscillator(),g=AC.createGain(),s=AC.currentTime+at;o.type=t;o.frequency.value=f;o.connect(g);g.connect(AC.destination);g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(v,s+.02);g.gain.exponentialRampToValueAtTime(.001,s+d);o.start(s);o.stop(s+d+.02)};
+const sfx={hello:()=>{tone(523,.25);tone(659,.25,.15,'sine',.12);tone(784,.35,.15,'sine',.24)},think:()=>tone(440,.08,.08,'triangle'),err:()=>{tone(220,.2,.12,'square');tone(180,.25,.12,'square',.15)}};
+let voice=null;const pv=()=>{const v=(window.speechSynthesis?speechSynthesis.getVoices():[]).filter(x=>/^tr/i.test(x.lang));voice=v.find(x=>/google|yelda|filiz|tolga|neural|online|natural/i.test(x.name))||v[0]||null};
+if(window.speechSynthesis){speechSynthesis.onvoiceschanged=pv;pv()}
+/* ====== YERLEŞİK TÜRKÇE KONUŞMA SENTEZİ (formant): ses dosyası, internet, hiçbir servis gerekmez ====== */
+let VOICE='builtin';const PITCH=125;
+const PH={
+ a:['V',750,1250,2500],e:['V',500,1900,2500],ı:['V',350,1400,2300],i:['V',300,2200,2900],o:['V',450,850,2500],ö:['V',450,1500,2300],u:['V',330,800,2400],ü:['V',300,1700,2200],
+ m:['N',250,1100,2200],n:['N',250,1500,2400],l:['L',380,1150,2500],r:['R',400,1300,1900],y:['L',270,2200,2900],
+ v:['Z',300,1100,2300,3000],z:['Z',280,1700,2600,5800],j:['Z',280,1800,2500,3200],
+ f:['F',0,0,0,4500],s:['F',0,0,0,6800],ş:['F',0,0,0,3400],h:['H',0,0,0,1700],
+ b:['P',300,1000,2300,900,1],p:['P',300,1000,2300,900,0],d:['P',300,1600,2600,4200,1],t:['P',300,1600,2600,4200,0],
+ g:['P',300,1500,2300,2200,1],k:['P',300,1700,2400,2400,0],c:['A',280,1800,2500,3600,1],ç:['A',280,1800,2500,3600,0]};
+const TN='sıfır bir iki üç dört beş altı yedi sekiz dokuz'.split(' '),TT=['','on','yirmi','otuz','kırk','elli','altmış','yetmiş','seksen','doksan'];
+const hw=n=>{const o=[],h=n/100|0,t=n%100/10|0,u=n%10;if(h){if(h>1)o.push(TN[h]);o.push('yüz')}if(t)o.push(TT[t]);if(u)o.push(TN[u]);return o};
+const numW=n=>{if(n===0)return['sıfır'];if(n>999999)return[...String(n)].map(d=>TN[+d]);const th=n/1000|0,o=[];if(th){if(th>1)o.push(...hw(th));o.push('bin')}return[...o,...hw(n%1000)]};
+const lo=c=>c==='İ'?'i':c==='I'?'ı':c.toLowerCase(),CM={â:'a',î:'i',û:'u',q:'k',w:'v'};
+const isV=c=>PH[c]&&PH[c][0]==='V';
+function phones(w){const o=[];for(let c of w){c=lo(c);c=CM[c]||c;if(c==='x'){o.push('k','s');continue}if(c==='ğ'||PH[c])o.push(c)}return o}
+function plan(text){
+  const re=/(\d{1,2}):(\d{2})|\d+|\p{L}+|[.,!?;:]/gu,items=[];let m;
+  while(m=re.exec(text)){const e=m.index+m[0].length;
+    if(m[1]!==undefined){for(const w of[...numW(+m[1]),...(+m[2]?numW(+m[2]):[])])items.push({w,ce:e})}
+    else if(/^\d/.test(m[0])){for(const w of numW(+m[0]))items.push({w,ce:e})}
+    else if(/^\p{L}/u.test(m[0]))items.push({w:m[0],ce:e});else items.push({p:m[0],ce:e})}
+  const sents=[];let cur={items:[],end:''};
+  for(const it of items){if(it.p&&/[.!?]/.test(it.p)){cur.end=it.p;cur.items.push(it);sents.push(cur);cur={items:[],end:''}}else cur.items.push(it)}
+  if(cur.items.length)sents.push(cur);
+  const segs=[],marks=[];let t=0,lf=PITCH;
+  const push=(d,o)=>{segs.push({t,d,f:null,va:0,na:0,nf:0,f0:lf,...o});if(o.f0)lf=o.f0;t+=d};
+  for(const S of sents){
+    const ws=S.items.filter(x=>x.w),lastW=ws[ws.length-1];let total=0;for(const w of ws)total+=phones(w.w).length;total=Math.max(1,total);let k=0;
+    for(const it of S.items){
+      if(it.p){push(/[.!?]/.test(it.p)?(it.p==='?'?.4:.45):.22,{});continue}
+      marks.push({t,n:it.ce});const ph=phones(it.w),vi=ph.map(isV),last=vi.lastIndexOf(true),ns=vi.filter(Boolean).length;
+      ph.forEach((c,i)=>{
+        if(c==='ğ'){const q=segs[segs.length-1];if(q&&q.v){q.d+=.07;t+=.07}return}
+        const p=PH[c],pr=k++/total;let f0=PITCH*(1.12-.26*pr);
+        if(S.end==='?'&&it===lastW)f0*=1+.35*(i/ph.length);if(i===last&&ns>1)f0*=1.08;
+        const loc=[p[1],p[2],p[3]];
+        switch(p[0]){
+          case'V':{const st=i===last&&ns>1;push((st?.115:.095),{f:loc,va:1,f0,v:1});break}
+          case'N':push(.07,{f:loc,va:.45,f0});break;
+          case'L':push(.065,{f:loc,va:.75,f0});break;
+          case'R':push(.045,{f:loc,va:.55,f0});break;
+          case'Z':push(.08,{f:loc,va:.5,na:.3,nf:p[4],f0});break;
+          case'F':push(.095,{va:0,na:.55,nf:p[4],f0});break;
+          case'H':push(.07,{va:.15,na:.35,nf:p[4],f0});break;
+          case'P':push(.035,{f:loc,va:p[5]?.25:0,f0});push(.015,{va:p[5]?.4:0,na:.7,nf:p[4],f0});if(!p[5])push(.025,{na:.2,nf:p[4],f0});break;
+          case'A':push(.03,{f:loc,va:p[5]?.2:0,f0});push(.06,{va:p[5]?.3:0,na:.5,nf:p[4],f0});break}
+      });
+      push(.03,{});
+    }
+    if(!S.end)push(.2,{});
+  }
+  return{segs,marks,total:t}
+}
+async function synthSay(text,onChars){
+  await AC.resume();const P=plan(text);if(!P.segs.length)return false;
+  const t0=AC.currentTime+.1,end=t0+P.total+.2;
+  const comp=AC.createDynamicsCompressor();comp.threshold.value=-20;comp.knee.value=20;comp.ratio.value=6;
+  const master=AC.createGain();master.gain.value=1.3;comp.connect(master);master.connect(AC.destination);
+  const src=AC.createOscillator();src.type='sawtooth';const vg=AC.createGain(),lp=AC.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3800;src.connect(vg);vg.connect(lp);
+  const F=[[7,1],[9,.65],[10,.35]].map(([q,g])=>{const b=AC.createBiquadFilter();b.type='bandpass';b.Q.value=q;const x=AC.createGain();x.gain.value=g;lp.connect(b);b.connect(x);x.connect(comp);return b});
+  const ns=AC.createBufferSource();ns.buffer=NB;ns.loop=true;const nb=AC.createBiquadFilter();nb.type='bandpass';nb.Q.value=1.2;const ng=AC.createGain();ns.connect(nb);nb.connect(ng);ng.connect(comp);
+  vg.gain.setValueAtTime(0,t0);ng.gain.setValueAtTime(0,t0);src.frequency.setValueAtTime(PITCH,t0);nb.frequency.setValueAtTime(3000,t0);[500,1500,2500].forEach((f,i)=>F[i].frequency.setValueAtTime(f,t0));
+  for(const s of P.segs){const a=t0+s.t,r=Math.min(.035,s.d*.6),ra=Math.min(.015,s.d*.5);
+    if(s.f)F.forEach((b,i)=>b.frequency.linearRampToValueAtTime(s.f[i],a+r));
+    vg.gain.linearRampToValueAtTime(s.va*3,a+ra);ng.gain.linearRampToValueAtTime(s.na*2.2,a+ra);
+    if(s.nf)nb.frequency.setTargetAtTime(s.nf,a,.005);
+    src.frequency.linearRampToValueAtTime(s.f0,a+Math.min(.05,s.d))}
+  vg.gain.linearRampToValueAtTime(0,end);ng.gain.linearRampToValueAtTime(0,end);
+  src.start(t0);ns.start(t0);src.stop(end+.05);ns.stop(end+.05);
+  return new Promise(res=>{const iv=setInterval(()=>{const el=AC.currentTime-t0;let n=0;for(const m of P.marks){if(m.t<=el)n=m.n;else break}onChars(n);if(el>=P.total+.1){clearInterval(iv);res(true)}},40)})
+}
+async function say(t){
+  const ai=$('#ai');ai.textContent='';B.className='speak';lastReply=t;let ok=false;pv();
+  if(spk&&VOICE==='builtin'&&AC){try{ok=await synthSay(t,n=>{ai.textContent=t.slice(0,n)})}catch(e){ok=false;console.log(e)}}
+  else if(spk&&VOICE==='device'&&voice){ok=await new Promise(res=>{const u=new SpeechSynthesisUtterance(t);u.lang='tr-TR';u.voice=voice;u.onboundary=e=>{ai.textContent=t.slice(0,e.charIndex+(e.charLength||4))};u.onend=()=>res(true);u.onerror=()=>res(false);speechSynthesis.cancel();speechSynthesis.speak(u);setTimeout(()=>res(true),t.length*110+4000)})}
+  if(!ok){const w=t.split(' ');for(let i=1;i<=w.length;i++){ai.textContent=w.slice(0,i).join(' ');await sleep(spk?330:260)}}
+  ai.textContent=t;await sleep(300);
+}
+function speak(t){talking++;stopListen();chain=chain.then(()=>say(t)).then(()=>{if(--talking===0){B.className='';lastAct=Date.now();ignoreUntil=Date.now()+700;setTimeout(startListen,500)}});return chain}
+
+/* ====== DİNLEME: önce tarayıcı, olmazsa mikrofon kaydı + Google yapay zekâ ile yazıya çevirme ====== */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null,srFailed=!SR,recorder=false,ignoreUntil=0;
+function stopListen(){if(rec){try{rec.abort()}catch(e){}rec=null}}
+function startListen(){
+  if(!micOK||!started||talking||thinking)return;
+  if(!srFailed){try{rec=new SR();rec.lang='tr-TR';rec.interimResults=true;rec.continuous=false;
+    rec.onstart=()=>{B.className='listen'};
+    rec.onresult=e=>{let t='',f=false;for(const r of e.results){t+=r[0].transcript;if(r.isFinal)f=true}$('#me').textContent=t;if(f)handle(t)};
+    rec.onerror=e=>{lastErr=e.error;if(DBG)$('#me').textContent='tanıma hatası: '+e.error;if(['network','service-not-allowed','language-not-supported'].includes(e.error)){srFailed=true;startListen()}else if(e.error==='not-allowed'){micOK=false;$('#ai').textContent='Mikrofon izni verilmedi. Klavyeyle yazabilirsin.'}};
+    rec.onend=()=>{if(B.className==='listen')B.className='';if(micOK&&!talking&&!srFailed)setTimeout(startListen,300)};rec.start()}catch(e){srFailed=true;startListen()}return}
+  if(!recorder){if(allowNet&&GEMINI_KEY)startRecorder();else if(!warned){warned=true;speak('Bu tarayıcıda konuşma tanıma çalışmıyor. Seni duyabilmem için internet izni ve Google anahtarı gerekiyor. Şimdilik klavyeyle yazabilirsin.')}}
+}
+let rctx,rstream,voiced=false,lastVoice=0,buf=[],pre=[];
+async function startRecorder(){
+  recorder=true;
+  try{rstream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});rctx=new AudioContext();
+    rctx.resume();let cal=[],thr=.02;const src=rctx.createMediaStreamSource(rstream),pr=rctx.createScriptProcessor(4096,1,1);
+    pr.onaudioprocess=e=>{if(talking||Date.now()<ignoreUntil){voiced=false;buf=[];return}
+      const d=new Float32Array(e.inputBuffer.getChannelData(0));let s=0;for(const v of d)s+=v*v;const rms=Math.sqrt(s/d.length),now=Date.now();lvlv=rms;
+      if(cal.length<8){cal.push(rms);if(cal.length===8){cal.sort();thr=Math.max(.008,cal[4]*3)}return}
+      if(rms>thr){if(!voiced){voiced=true;buf=[...pre];B.className='listen'}lastVoice=now}
+      if(voiced){buf.push(d);if(now-lastVoice>900||buf.length*4096>rctx.sampleRate*12){voiced=false;const b=buf;buf=[];B.className='';sttGoogle(b,rctx.sampleRate)}}
+      else{pre.push(d);if(pre.length>3)pre.shift()}};
+    src.connect(pr);pr.connect(rctx.destination)}catch(e){recorder=false;micOK=false;$('#ai').textContent='Mikrofon açılamadı.'}
+}
+function wav(chs,sr){let n=0;for(const c of chs)n+=c.length;const all=new Float32Array(n);let o=0;for(const c of chs){all.set(c,o);o+=c.length}
+  const f=sr/16000,m=Math.floor(n/f),pcm=new Int16Array(m);for(let k=0;k<m;k++)pcm[k]=Math.max(-1,Math.min(1,all[Math.floor(k*f)]))*32767;
+  const h=new DataView(new ArrayBuffer(44));const w=(p,t)=>[...t].forEach((c,x)=>h.setUint8(p+x,c.charCodeAt(0)));
+  w(0,'RIFF');h.setUint32(4,36+m*2,true);w(8,'WAVEfmt ');h.setUint32(16,16,true);h.setUint16(20,1,true);h.setUint16(22,1,true);h.setUint32(24,16000,true);h.setUint32(28,32000,true);h.setUint16(32,2,true);h.setUint16(34,16,true);w(36,'data');h.setUint32(40,m*2,true);
+  return new Blob([h,pcm],{type:'audio/wav'})}
+async function sttGoogle(chs,sr){
+  if(chs.length*4096/sr<.5)return;
+  try{const b64=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(wav(chs,sr))});
+    $('#me').textContent='...';sfx.think();
+    const t=await gem([{role:'user',parts:[{inlineData:{mimeType:'audio/wav',data:b64}},{text:'Bu ses kaydındaki Türkçe konuşmayı aynen yazıya çevir. Sadece söylenen metni yaz, başka hiçbir şey ekleme. Anlaşılır bir konuşma yoksa boş bırak.'}]}]);
+    if(t)handle(t);else $('#me').textContent=''}catch(e){sfx.err();$('#me').textContent='';ignoreUntil=Date.now()+1500}
+}
+
+/* ====== GOOGLE YAPAY ZEKÂ (Gemini) ve Vikipedi ====== */
+const SYS='Sen Göz adında, gözleri yanıp sönen, sesli konuşan samimi bir Türkçe sohbet arkadaşısın. Cevapların en fazla 3 kısa cümle olsun; markdown, liste ve emoji kullanma. Matematik işlemi çözme, nazikçe yapamadığını söyle. Güncel ya da bilmediğin konularda Google aramasını kullanıp özetle. Uygunsa sonda kullanıcıya kısa, doğal bir soru sor. Konuşmanın devamlılığını koru: kullanıcının önceki cümlelerine ve söylediği kişisel bilgilere bağlı kal. Önce sohbet et, ansiklopedi gibi konuşma.';
+const sysTxt=()=>'Adın '+botName+'. '+SYS+(facts()?' Kullanıcı hakkında bildiklerin: '+facts()+'.':'');
+async function gem(contents,o={}){
+  for(const m of MODELS){
+    const body={contents};if(o.sys)body.systemInstruction={parts:[{text:o.sys}]};if(o.search)body.tools=[{googleSearch:{}}];
+    const post=b=>fetch('https://generativelanguage.googleapis.com/v1beta/models/'+m+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':GEMINI_KEY},body:JSON.stringify(b)});
+    let r=await post(body);if(r.status===404)continue;
+    if(!r.ok&&body.tools){delete body.tools;r=await post(body)}
+    if(!r.ok)throw new Error(r.status);
+    const j=await r.json();return(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim()}
+  throw new Error('model')}
+async function wiki(q){try{const j=await(await fetch('https://tr.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=1&prop=extracts&exintro=1&explaintext=1&gsrsearch='+encodeURIComponent(q))).json();
+  const p=Object.values(j.query?.pages||{})[0];return p&&p.extract?'Vikipedi\'ye göre, '+p.extract.split(/(?<=[.!?])\s/).slice(0,2).join(' ').slice(0,380):null}catch(e){return null}}
+async function askAI(q){
+  if(!allowNet)return'Bunu bilmiyorum. İnternete bağlanma iznini vermediğin için araştıramıyorum.'+TEACH;
+  if(!navigator.onLine)return'Bunu bilmiyorum ve şu an internet yok.'+TEACH;
+  if(GEMINI_KEY){try{const a=await gem([...hist,{role:'user',parts:[{text:q}]}],{search:true,sys:sysTxt()});if(a){aiOK=true;return a}}catch(e){sfx.err()}}
+  const w=await wiki(q);if(w){aiOK=true;return w}return'Bunu bulamadım. Başka türlü sorar mısın?'+TEACH}
+
+/* ====== ÇİZİM: kağıt çıkar, çiz, "Oldu mu?" de ====== */
+const circ=(x,y,r,n=30)=>Array.from({length:n+1},(_,i)=>[x+r*Math.cos(2*Math.PI*i/n),y+r*Math.sin(2*Math.PI*i/n)]);
+const rays=()=>Array.from({length:12},(_,k)=>{const a=k*Math.PI/6;return['#f5b800',[[.5+.18*Math.cos(a),.5+.18*Math.sin(a)],[.5+.28*Math.cos(a),.5+.28*Math.sin(a)]]]});
+const petals=()=>Array.from({length:5},(_,k)=>{const a=k*2*Math.PI/5;return['#e84393',circ(.5+.1*Math.cos(a),.42+.1*Math.sin(a),.065,14)]});
+const heart=()=>Array.from({length:41},(_,i)=>{const t=2*Math.PI*i/40;return[.5+16*Math.sin(t)**3*.018,.46-(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))*.018]});
+const star=()=>Array.from({length:11},(_,i)=>{const r=i%2?.11:.27;return[.5+r*Math.sin(Math.PI*i/5),.5-r*Math.cos(Math.PI*i/5)]});
+const SH={
+ ev:{rx:/\bevi?\b/,s:[['#8b5a2b',[[.25,.55],[.25,.85],[.75,.85],[.75,.55]]],['#c0392b',[[.2,.55],[.5,.25],[.8,.55],[.2,.55]]],['#5d4037',[[.45,.85],[.45,.68],[.55,.68],[.55,.85]]],['#3498db',[[.31,.62],[.39,.62],[.39,.7],[.31,.7],[.31,.62]]],['#3498db',[[.61,.62],[.69,.62],[.69,.7],[.61,.7],[.61,.62]]]]},
+ agac:{rx:/\bagac/,s:[['#8b5a2b',[[.46,.9],[.46,.58]]],['#8b5a2b',[[.54,.9],[.54,.58]]],['#2e8b57',circ(.5,.4,.18)],['#2e8b57',circ(.38,.5,.12)],['#2e8b57',circ(.62,.5,.12)]]},
+ gunes:{rx:/\bgunes/,s:[['#f5b800',circ(.5,.5,.14)],...rays()]},
+ cicek:{rx:/\bcicek/,s:[['#2e8b57',[[.5,.9],[.5,.55]]],['#2e8b57',[[.5,.75],[.62,.68]]],...petals(),['#f5b800',circ(.5,.42,.05,12)]]},
+ kalp:{rx:/\bkalp/,s:[['#e63946',heart()]]},yildiz:{rx:/\byildiz/,s:[['#f5b800',star()]]},
+ balik:{rx:/\bbalik/,s:[['#ff8c00',Array.from({length:37},(_,i)=>{const t=2*Math.PI*i/36;return[.5+.25*Math.cos(t),.5+.14*Math.sin(t)]})],['#ff8c00',[[.75,.5],[.88,.38],[.88,.62],[.75,.5]]],['#222',circ(.38,.46,.015,8)]]},
+ araba:{rx:/\baraba/,s:[['#c0392b',[[.15,.65],[.15,.5],[.3,.5],[.38,.38],[.62,.38],[.72,.5],[.85,.5],[.85,.65],[.15,.65]]],['#222',circ(.3,.68,.07,16)],['#222',circ(.7,.68,.07,16)],['#3498db',[[.4,.42],[.6,.42],[.66,.5],[.34,.5],[.4,.42]]]]}};
+let raf=0,drawDone=false,lastShape='';
+const closePaper=()=>{$('#paper').classList.remove('on');cancelAnimationFrame(raf);drawDone=false};
+function startDraw(name){
+  lastShape=name;drawDone=false;cancelAnimationFrame(raf);
+  const x=$('#cv').getContext('2d');x.clearRect(0,0,640,800);x.lineWidth=4;x.lineCap=x.lineJoin='round';
+  const pts=[];for(const[col,st]of SH[name].s){const j=st.map(([a,b])=>[a+(Math.random()-.5)*.008,b+(Math.random()-.5)*.008]);let f=true;
+    for(let i=0;i<j.length-1;i++){const[a,b]=j[i],[c,d]=j[i+1],k=Math.max(1,Math.hypot(c-a,d-b)/.015|0);for(let m=0;m<=k;m++){pts.push([col,a+(c-a)*m/k,b+(d-b)*m/k,f&&m===0]);f=false}}}
+  $('#paper').classList.add('on');let i=0,last=null;const per=Math.max(1,pts.length/240|0);
+  setTimeout(function step(){for(let n=0;n<per&&i<pts.length;n++,i++){const[c,a,b,nw]=pts[i],X=a*640,Y=b*800;x.strokeStyle=c;if(last&&!nw){x.beginPath();x.moveTo(last[0],last[1]);x.lineTo(X,Y);x.stroke()}last=[X,Y]}
+    if(i<pts.length)raf=requestAnimationFrame(step);else{drawDone=true;setTimeout(()=>speak('Oldu mu?'),400)}},1000);
+}
+
+/* ====== BEYİN: yerel sohbet -> yerel bilgi -> Google yapay zekâ ====== */
+function think(t){
+  const n=norm(t),rl=t.toLocaleLowerCase('tr');let m;
+  if(pend&&pend.t==='riddle'){const p=pend;if(t.split(' ').length>4||/\b(ciz|kapat|ara|arastir)\b/.test(n))pend=null;else{if(p.re.test(n)){pend=null;return'Doğru bildin, harikasın! Başka bilmece ister misin?'}if(/bilmiyorum|vazgec|pas|soyle/.test(n)||++p.n>=3){pend=null;return'Cevap: '+p.a+'. Bir tane daha ister misin?'}return'Yaklaştın ama değil, bir daha dene.'}}
+  if(isMath(t,n))return pick(MATH);
+  if(drawDone){if(/\b(evet|oldu|guzel|super|harika|begendim|tamam)\b/.test(n))return'Sevindim! Başka bir şey çizmemi ister misin?';if(/\b(hayir|olmadi|kotu|tekrar|degil)\b/.test(n)){startDraw(lastShape);return'Tamam, bir daha deneyeyim.'}}
+  if(/\b(kagidi kapat|kapat)\b/.test(n)){closePaper();return'Tamam.'}
+  if(/\b(ciz|cizer misin|resim)\b/.test(n)){for(const k in SH)if(SH[k].rx.test(n)){startDraw(k);return'Bir kağıt çıkarıyorum, hemen çiziyorum.'}return'Şunları çizebilirim: ev, ağaç, güneş, çiçek, kalp, yıldız, balık ve araba.'}
+  const rc=recall(n);if(rc){ctx=null;return rc}
+  const ln=learn(t,rl);if(ln){ctx=null;return ln}
+  if(m=rl.match(/\b(?:araştır|ara)\s+(.+)/)||rl.match(/(.+?)\s+(?:araştır|ara)$/))return{ai:m[1].replace(/\b(internette|internetten|bana|lütfen|hakkında)\b/g,'').trim()+' hakkında internetten araştırıp kısaca özetle.'};
+  const lr=fromLearned(n);if(lr){ctx={kind:'ai'};return lr}
+  if(ctx&&FU.test(n)){const f=follow(n);if(f)return f}
+  const l=canAI()?null:lookup(t);
+  if(l&&l.s>=.95){ctx={kind:'ent',e:Math.floor(l.k/INT.length)};return l.r}
+  for(const it of DC)if(it.re.test(n)){let r=fill(pick(it.r));ctx={kind:'dc',it};if(it.q.length&&!/\?$/.test(r)&&Math.random()<.65){r+=' '+pick(it.q);pend={t:'free'}}return r}
+  if(canAI())return null;
+  if(l){ctx={kind:'ent',e:Math.floor(l.k/INT.length)};return l.r}
+  if(pend&&pend.t==='free'&&t.split(' ').length<8&&!/\b(nedir|ne demek|nasil|neden|nicin|kim|kimdir|nerede|ne zaman|hangi|kac|midir)\b|\bm[iu]$/.test(n))return pick(ACK)+' '+pick(IDLE);
+  return null;
+}
+async function handle(t){
+  t=(t||'').trim();if(!t||talking||thinking)return;lastAct=Date.now();idleN=0;$('#me').textContent=t;
+  let r=think(t);
+  if(r===null||typeof r==='object'){const q=r?r.ai:t;thinking=true;stopListen();B.className='listen';sfx.think();aiOK=false;r=await askAI(q);B.className='';thinking=false;ctx={kind:'ai'};
+    const n=norm(t);if(aiOK&&n.split(' ').length>=2&&r.length<260&&!/\b(bugun|simdi|hava|dolar|euro|bitcoin|mac|fiyat|haber|saat|son|yarin|dun)\b/.test(n)&&!r.includes('?'))learned.push({k:n,a:r,t:0})}
+  else if(pend&&pend.t==='free'&&!/\?$/.test(r))pend=null;
+  hist.push({role:'user',parts:[{text:t}]},{role:'model',parts:[{text:r}]});while(hist.length>12)hist.shift();save();
+  speak(r.length>420?r.slice(0,420).replace(/[^.!?]*$/,'')||r.slice(0,420):r);
+}
+setInterval(()=>{if(started&&!talking&&idleN<3&&Date.now()-lastAct>28000){idleN++;lastAct=Date.now();pend={t:'free'};speak(pick(IDLE))}},4000);
+
+/* ====== İZİNLER (tek "arayüz" bu) ve klavye ====== */
+const PQ=[['Hoparlörü kullanmama izin veriyor musun?','Sesli konuşmak için.',v=>{spk=v;if(v){AC=new(window.AudioContext||window.webkitAudioContext)();AC.resume();NB=AC.createBuffer(1,AC.sampleRate,AC.sampleRate);const d=NB.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}}],
+ ['Mikrofonunu dinlememe izin veriyor musun?','Seni duyabilmem için. Tarayıcı ayrıca izin soracak.',async v=>{if(!v)return;micAsked=true;try{rstream=await navigator.mediaDevices.getUserMedia({audio:true});micOK=true;if(DBG)meter(rstream);else if(!srFailed)rstream.getTracks().forEach(t=>t.stop())}catch(e){micOK=false;micErr=e.name||'hata'}}],
+ ['İnternete bağlanıp bilmediğim şeyleri Google yapay zekâsına sormama izin veriyor musun?','Evet dersen bilmediğim konuları araştırıp özetlerim. Hayır dersen sadece kendi bildiklerimle konuşurum.',v=>{allowNet=v}]];
+let pi=0;const ask=()=>{$('#pq').textContent=PQ[pi][0];$('#ps').textContent=PQ[pi][1]};
+async function answer(v){await PQ[pi][2](v);if(++pi<PQ.length)return ask();$('#perm').remove();started=true;sfx.hello();lastAct=Date.now();
+  if(allowNet&&!GEMINI_KEY)setTimeout(()=>speak('Google yapay zekâ anahtarı girilmemiş, bilmediklerimi sadece Vikipedi\'den bakabilirim.'),3500);
+  speak('Merhaba'+(uname?' '+uname:'')+'! Ben '+botName+'. '+(uname?'Seni tekrar görmek güzel. ':'Seninle sohbet etmeye hazırım. ')+'Bugün nasılsın?');
+  if(micAsked&&!micOK)speak(micErr==='NotFoundError'?'Bu cihazda mikrofon bulamadım. Bir mikrofon takıp sayfayı yenile.':micErr==='NotAllowedError'?'Mikrofon izni verilmedi. Tarayıcının izin ayarından mikrofona izin verip sayfayı yenile.':'Mikrofonu açamadım. Hata: '+micErr+'.')}
+$('#py').onclick=()=>answer(true);$('#pn').onclick=()=>answer(false);ask();
+addEventListener('keydown',e=>{
+  if($('#perm')){if(/^[ey]$/i.test(e.key)||e.key==='Enter')answer(true);else if(/^[hn]$/i.test(e.key))answer(false);return}
+  if(e.key==='F2'){e.preventDefault();VOICE=VOICE==='builtin'?'device':'builtin';speak(VOICE==='builtin'?'Yerleşik ses seçildi.':'Cihaz sesi seçildi.');return}
+  if(e.key==='Escape'){closePaper();typed='';$('#me').textContent='';return}
+  if(e.key==='Enter'){const t=typed;typed='';handle(t);return}
+  if(e.key==='Backspace')typed=typed.slice(0,-1);else if(e.key.length===1&&!e.ctrlKey&&!e.metaKey)typed+=e.key;else return;
+  $('#me').textContent=typed+'|'});
+console.log('Cevap:',RESP.length,'Giriş:',NDOC);
+</script></body></html>
